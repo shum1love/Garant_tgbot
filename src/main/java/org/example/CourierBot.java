@@ -126,11 +126,11 @@ public class CourierBot extends TelegramLongPollingBot {
 
     @Override
     public String getBotUsername() {
-        return "YourBotUsername";
+        return "garanttestdrivebot1bot";
     }
 
     @Override
     public String getBotToken() {
-        return "YourBotToken";
+        return "7850699386:AAEc5eqsnUbEUm7tLp_rxU-k7wFmHUfELe8";
     }
 }
