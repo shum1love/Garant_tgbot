@@ -20,6 +20,12 @@
             <artifactId>telegrambots</artifactId>
             <version>6.5.0</version>
         </dependency>
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>LATEST</version> <!-- Замените на актуальную версию -->
+        </dependency>
+
 
         <!-- JDBC Driver for Microsoft SQL Server -->
         <dependency>

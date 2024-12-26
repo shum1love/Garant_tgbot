@@ -1,97 +1,84 @@
 package org.example;
 
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.BotApiMethod;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.Statement;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
 public class CourierBot extends TelegramLongPollingBot {
 
-    private static final String DB_URL = "jdbc:sqlite:garant.db";
-
-    // Конструктор: создаём базу данных и заполняем тестовыми данными
-    public CourierBot() {
-        try (Connection connection = DriverManager.getConnection(DB_URL)) {
-            String createTableQuery = "CREATE TABLE IF NOT EXISTS orders (" +
-                    "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                    "order_number TEXT, " +
-                    "status TEXT, " +
-                    "address TEXT, " +
-                    "recipient TEXT, " +
-                    "payment_method TEXT, " +
-                    "courier_id INTEGER DEFAULT NULL)";
-            Statement statement = connection.createStatement();
-            statement.execute(createTableQuery);
-
-            /// Заполнение тестовыми данными
-            String insertTestData = """
-    INSERT INTO orders (order_number, status, address, recipient, payment_method)
-    VALUES
-    ('ORD001', 'Свободен', 'ул. Пушкина, д. 10', 'Иван Иванов', 'Карта'),
-    ('ORD002', 'Свободен', 'ул. Лермонтова, д. 20', 'Мария Петрова', 'Наличные'),
-    ('ORD003', 'Свободен', 'ул. Чехова, д. 5', 'Сергей Сергеев', 'Карта'),
-    ('ORD004', 'Свободен', 'ул. Гоголя, д. 12', 'Анна Смирнова', 'Наличные'),
-    ('ORD005', 'Свободен', 'ул. Толстого, д. 8', 'Петр Николаев', 'Карта'),
-    ('ORD006', 'Свободен', 'ул. Тургенева, д. 15', 'Ольга Кузнецова', 'Наличные'),
-    ('ORD007', 'Свободен', 'ул. Льва, д. 9', 'Дмитрий Алексеев', 'Карта'),
-    ('ORD008', 'Свободен', 'ул. Некрасова, д. 22', 'Елена Морозова', 'Наличные');
-""";
-            statement.executeUpdate(insertTestData);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+    // Конфигурация подключения к базе данных
+    private static final String DB_URL = "jdbc:mysql://localhost:3306/courier_service";
+    private static final String DB_USER = "tgbot"; // Укажите вашего пользователя
+    private static final String DB_PASSWORD = "1234"; // Укажите ваш пароль
 
     @Override
     public String getBotUsername() {
-        return "garanttestdrivebot1bot";
+        return "garanttestdrivebot1bot"; // Имя бота
     }
 
     @Override
     public String getBotToken() {
-        return "7850699386:AAEc5eqsnUbEUm7tLp_rxU-k7wFmHUfELe8";
+        return "7850699386:AAEc5eqsnUbEUm7tLp_rxU-k7wFmHUfELe8"; // Замените на токен вашего бота
     }
 
     @Override
     public void onUpdateReceived(Update update) {
         if (update.hasMessage() && update.getMessage().hasText()) {
-            String userMessage = update.getMessage().getText();
-            long userId = update.getMessage().getFrom().getId();
-            String chatId = update.getMessage().getChatId().toString();
+            String messageText = update.getMessage().getText();
+            long chatId = update.getMessage().getChatId();
 
-            if ("/start".equals(userMessage)) {
-                sendMessage(chatId, "Добро пожаловать! Используйте команды:\n" +
-                        "/orders - Показать актуальные заказы\n" +
-                        "/take_order <номер заказа> - Взять заказ");
-            } else if ("/orders".equals(userMessage)) {
-                String orders = getAvailableOrders();
-                sendMessage(chatId, orders.isEmpty() ? "Нет доступных заказов." : orders);
-            } else if (userMessage.startsWith("/take_order")) {
-                String[] parts = userMessage.split(" ");
+            if (messageText.equals("/start")) {
+                sendStartMessage(chatId);
+            } else if (messageText.startsWith("/status")) {
+                String[] parts = messageText.split(" ");
                 if (parts.length == 2) {
-                    String orderNumber = parts[1];
-                    boolean result = takeOrder(orderNumber, userId);
-                    sendMessage(chatId, result ? "Вы успешно взяли заказ " + orderNumber : "Не удалось взять заказ. Возможно, его уже взяли.");
+                    int orderId;
+                    try {
+                        orderId = Integer.parseInt(parts[1]);
+                        String orderInfo = getOrderInfo(orderId);
+                        sendMessage(chatId, orderInfo);
+                    } catch (NumberFormatException e) {
+                        sendMessage(chatId, "Пожалуйста, введите корректный номер заказа.");
+                    }
                 } else {
-                    sendMessage(chatId, "Используйте формат: /take_order <номер заказа>");
+                    sendMessage(chatId, "Используйте формат: /status [номер заказа]");
                 }
-            } else {
-                sendMessage(chatId, "Неизвестная команда. Используйте /start для справки.");
+            }
+        } else if (update.hasCallbackQuery()) {
+            String callbackData = update.getCallbackQuery().getData();
+            long chatId = update.getCallbackQuery().getMessage().getChatId();
+
+            if (callbackData.equals("SHOW_ORDERS")) {
+                String orders = getAvailableOrders();
+                sendMessage(chatId, orders);
             }
         }
     }
 
-    // Метод для отправки сообщения
-    private void sendMessage(String chatId, String text) {
+    private void sendStartMessage(long chatId) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
-        message.setText(text);
+        message.setText("Добро пожаловать! Нажмите кнопку ниже, чтобы увидеть заказы, которые можно взять в работу.");
+
+        // Добавление кнопки "Начать"
+        InlineKeyboardMarkup keyboardMarkup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
+        List<InlineKeyboardButton> row = new ArrayList<>();
+        InlineKeyboardButton startButton = new InlineKeyboardButton("Показать доступные заказы");
+        startButton.setCallbackData("SHOW_ORDERS");
+        row.add(startButton);
+        keyboard.add(row);
+        keyboardMarkup.setKeyboard(keyboard);
+        message.setReplyMarkup(keyboardMarkup);
+
         try {
             execute(message);
         } catch (TelegramApiException e) {
@@ -99,37 +86,90 @@ public class CourierBot extends TelegramLongPollingBot {
         }
     }
 
-    // Получение доступных заказов
     private String getAvailableOrders() {
-        StringBuilder orders = new StringBuilder();
-        try (Connection connection = DriverManager.getConnection(DB_URL)) {
-            String selectQuery = "SELECT order_number, address, recipient, payment_method FROM orders WHERE status = 'Свободен'";
-            Statement statement = connection.createStatement();
-            ResultSet resultSet = statement.executeQuery(selectQuery);
+        StringBuilder result = new StringBuilder("📋 **Доступные заказы:**\n");
+        String query = "SELECT * FROM orders WHERE status = 'Принят'";
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement statement = connection.prepareStatement(query);
+             ResultSet resultSet = statement.executeQuery()) {
+
             while (resultSet.next()) {
-                orders.append("Номер заказа: ").append(resultSet.getString("order_number")).append("\n")
-                        .append("Адрес: ").append(resultSet.getString("address")).append("\n")
-                        .append("Получатель: ").append(resultSet.getString("recipient")).append("\n")
-                        .append("Оплата: ").append(resultSet.getString("payment_method")).append("\n\n");
+                result.append(String.format(
+                        "📄 Номер заказа: %d\n" +
+                                "📌 Статус: %s\n" +
+                                "📅 Создан: %s\n" +
+                                "⏰ Доставить до: %s\n" +
+                                "🏬 Основной магазин: %s\n" +
+                                "📦 Магазин дотарки: %s\n" +
+                                "📍 Адрес покупателя: %s\n" +
+                                "📞 Телефон покупателя: %s\n",
+                        resultSet.getInt("order_id"),
+                        resultSet.getString("status"),
+                        resultSet.getTimestamp("created_at"),
+                        resultSet.getTimestamp("delivery_deadline"),
+                        resultSet.getString("main_store"),
+                        resultSet.getString("secondary_store") != null ? resultSet.getString("secondary_store") : "Нет",
+                        resultSet.getString("customer_address"),
+                        resultSet.getString("customer_phone")
+                ));
             }
-        } catch (Exception e) {
+        } catch (SQLException e) {
             e.printStackTrace();
+            return "Ошибка получения данных из базы.";
         }
-        return orders.toString();
+
+        if (result.toString().equals("📋 **Доступные заказы:**\n")) {
+            return "На данный момент доступных заказов нет.";
+        }
+
+        return result.toString();
     }
 
-    // Взять заказ
-    private boolean takeOrder(String orderNumber, long courierId) {
-        try (Connection connection = DriverManager.getConnection(DB_URL)) {
-            String updateQuery = "UPDATE orders SET status = 'Взято', courier_id = ? WHERE order_number = ? AND status = 'Свободен'";
-            PreparedStatement preparedStatement = connection.prepareStatement(updateQuery);
-            preparedStatement.setLong(1, courierId);
-            preparedStatement.setString(2, orderNumber);
-            int rowsUpdated = preparedStatement.executeUpdate();
-            return rowsUpdated > 0;
-        } catch (Exception e) {
+    private String getOrderInfo(int orderId) {
+        String query = "SELECT * FROM orders WHERE order_id = ?";
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement statement = connection.prepareStatement(query)) {
+
+            statement.setInt(1, orderId);
+            ResultSet resultSet = statement.executeQuery();
+
+            if (resultSet.next()) {
+                return String.format(
+                        "🛒 **Информация о заказе:**\n" +
+                                "📄 Номер заказа: %d\n" +
+                                "📌 Статус: %s\n" +
+                                "📅 Создан: %s\n" +
+                                "⏰ Доставить до: %s\n" +
+                                "🏬 Основной магазин: %s\n" +
+                                "📦 Магазин дотарки: %s\n" +
+                                "📍 Адрес покупателя: %s\n" +
+                                "📞 Телефон покупателя: %s\n",
+                        resultSet.getInt("order_id"),
+                        resultSet.getString("status"),
+                        resultSet.getTimestamp("created_at"),
+                        resultSet.getTimestamp("delivery_deadline"),
+                        resultSet.getString("main_store"),
+                        resultSet.getString("secondary_store") != null ? resultSet.getString("secondary_store") : "Нет",
+                        resultSet.getString("customer_address"),
+                        resultSet.getString("customer_phone")
+                );
+            } else {
+                return "Заказ не найден.";
+            }
+        } catch (SQLException e) {
             e.printStackTrace();
-            return false;
+            return "Ошибка подключения к базе данных.";
+        }
+    }
+
+    private void sendMessage(long chatId, String text) {
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(text);
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
         }
     }
 }
