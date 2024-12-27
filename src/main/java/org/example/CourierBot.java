@@ -1,11 +1,13 @@
 package org.example;
 
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
-import org.telegram.telegrambots.meta.api.methods.BotApiMethod;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.sql.*;
@@ -14,14 +16,13 @@ import java.util.List;
 
 public class CourierBot extends TelegramLongPollingBot {
 
-    // Конфигурация подключения к базе данных
     private static final String DB_URL = "jdbc:mysql://localhost:3306/courier_service";
-    private static final String DB_USER = "tgbot"; // Укажите вашего пользователя
-    private static final String DB_PASSWORD = "1234"; // Укажите ваш пароль
+    private static final String DB_USER = "root";
+    private static final String DB_PASSWORD = "1234";
 
     @Override
     public String getBotUsername() {
-        return "garanttestdrivebot1bot"; // Имя бота
+        return "garanttestdrivebot1bot"; // Замените на имя вашего бота
     }
 
     @Override
@@ -35,48 +36,39 @@ public class CourierBot extends TelegramLongPollingBot {
             String messageText = update.getMessage().getText();
             long chatId = update.getMessage().getChatId();
 
-            if (messageText.equals("/start")) {
-                sendStartMessage(chatId);
-            } else if (messageText.startsWith("/status")) {
-                String[] parts = messageText.split(" ");
-                if (parts.length == 2) {
-                    int orderId;
-                    try {
-                        orderId = Integer.parseInt(parts[1]);
-                        String orderInfo = getOrderInfo(orderId);
-                        sendMessage(chatId, orderInfo);
-                    } catch (NumberFormatException e) {
-                        sendMessage(chatId, "Пожалуйста, введите корректный номер заказа.");
-                    }
-                } else {
-                    sendMessage(chatId, "Используйте формат: /status [номер заказа]");
-                }
-            }
-        } else if (update.hasCallbackQuery()) {
-            String callbackData = update.getCallbackQuery().getData();
-            long chatId = update.getCallbackQuery().getMessage().getChatId();
-
-            if (callbackData.equals("SHOW_ORDERS")) {
-                String orders = getAvailableOrders();
-                sendMessage(chatId, orders);
+            switch (messageText) {
+                case "/start":
+                case "Старт":
+                    sendMainMenu(chatId);
+                    break;
+                case "Показать все доступные заказы":
+                    sendAvailableOrders(chatId);
+                    break;
+                case "Мои заказы":
+                    sendMyOrders(chatId);
+                    break;
+                default:
+                    sendMessage(chatId, "Неизвестная команда. Используйте кнопки меню.");
             }
         }
     }
 
-    private void sendStartMessage(long chatId) {
+    private void sendMainMenu(long chatId) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
-        message.setText("Добро пожаловать! Нажмите кнопку ниже, чтобы увидеть заказы, которые можно взять в работу.");
+        message.setText("Главное меню:");
 
-        // Добавление кнопки "Начать"
-        InlineKeyboardMarkup keyboardMarkup = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
-        List<InlineKeyboardButton> row = new ArrayList<>();
-        InlineKeyboardButton startButton = new InlineKeyboardButton("Показать доступные заказы");
-        startButton.setCallbackData("SHOW_ORDERS");
-        row.add(startButton);
-        keyboard.add(row);
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        List<KeyboardRow> keyboard = new ArrayList<>();
+
+        KeyboardRow row1 = new KeyboardRow();
+        row1.add(new KeyboardButton("Показать все доступные заказы"));
+        row1.add(new KeyboardButton("Мои заказы"));
+
+        keyboard.add(row1);
+
         keyboardMarkup.setKeyboard(keyboard);
+        keyboardMarkup.setResizeKeyboard(true);
         message.setReplyMarkup(keyboardMarkup);
 
         try {
@@ -86,80 +78,111 @@ public class CourierBot extends TelegramLongPollingBot {
         }
     }
 
-    private String getAvailableOrders() {
-        StringBuilder result = new StringBuilder("📋 **Доступные заказы:**\n");
+    private void sendAvailableOrders(long chatId) {
         String query = "SELECT * FROM orders WHERE status = 'Принят'";
         try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
              PreparedStatement statement = connection.prepareStatement(query);
              ResultSet resultSet = statement.executeQuery()) {
 
+            boolean ordersFound = false;
+
             while (resultSet.next()) {
-                result.append(String.format(
+                ordersFound = true;
+                int orderId = resultSet.getInt("order_id");
+                String status = resultSet.getString("status");
+                Timestamp createdAt = resultSet.getTimestamp("created_at");
+                Timestamp deliveryDeadline = resultSet.getTimestamp("delivery_deadline");
+                String mainStore = resultSet.getString("main_store");
+                String customerAddress = resultSet.getString("customer_address");
+
+                // Формируем текст для текущего заказа
+                String orderText = String.format(
                         "📄 Номер заказа: %d\n" +
                                 "📌 Статус: %s\n" +
                                 "📅 Создан: %s\n" +
                                 "⏰ Доставить до: %s\n" +
                                 "🏬 Основной магазин: %s\n" +
-                                "📦 Магазин дотарки: %s\n" +
-                                "📍 Адрес покупателя: %s\n" +
-                                "📞 Телефон покупателя: %s\n",
-                        resultSet.getInt("order_id"),
-                        resultSet.getString("status"),
-                        resultSet.getTimestamp("created_at"),
-                        resultSet.getTimestamp("delivery_deadline"),
-                        resultSet.getString("main_store"),
-                        resultSet.getString("secondary_store") != null ? resultSet.getString("secondary_store") : "Нет",
-                        resultSet.getString("customer_address"),
-                        resultSet.getString("customer_phone")
-                ));
+                                "📍 Адрес покупателя: %s",
+                        orderId,
+                        status,
+                        createdAt != null ? createdAt.toString() : "Нет данных",
+                        deliveryDeadline != null ? deliveryDeadline.toString() : "Нет данных",
+                        mainStore != null ? mainStore : "Нет данных",
+                        customerAddress != null ? customerAddress : "Нет данных"
+                );
+
+                // Создаем кнопку для взятия заказа
+                InlineKeyboardMarkup keyboardMarkup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
+                List<InlineKeyboardButton> row = new ArrayList<>();
+
+                InlineKeyboardButton button = new InlineKeyboardButton();
+                button.setText("Взять в работу");
+                button.setCallbackData("takeOrder_" + orderId);
+
+                row.add(button);
+                keyboard.add(row);
+                keyboardMarkup.setKeyboard(keyboard);
+
+                // Отправляем текст заказа с кнопкой
+                SendMessage orderMessage = new SendMessage();
+                orderMessage.setChatId(chatId);
+                orderMessage.setText(orderText);
+                orderMessage.setReplyMarkup(keyboardMarkup);
+
+                execute(orderMessage);
             }
-        } catch (SQLException e) {
+
+            if (!ordersFound) {
+                // Если заказов нет, отправляем уведомление
+                sendMessage(chatId, "❌ Доступных заказов нет.");
+            }
+
+        } catch (SQLException | TelegramApiException e) {
             e.printStackTrace();
-            return "Ошибка получения данных из базы.";
+            sendMessage(chatId, "Ошибка получения данных из базы: " + e.getMessage());
         }
-
-        if (result.toString().equals("📋 **Доступные заказы:**\n")) {
-            return "На данный момент доступных заказов нет.";
-        }
-
-        return result.toString();
     }
 
-    private String getOrderInfo(int orderId) {
-        String query = "SELECT * FROM orders WHERE order_id = ?";
+
+    private void sendMyOrders(long chatId) {
+        String query = "SELECT * FROM orders WHERE courier_id = ?";
+        StringBuilder response = new StringBuilder("📋 **Мои заказы:**\n");
+
         try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
              PreparedStatement statement = connection.prepareStatement(query)) {
 
-            statement.setInt(1, orderId);
+            statement.setLong(1, chatId); // Используем chatId как идентификатор курьера
             ResultSet resultSet = statement.executeQuery();
 
-            if (resultSet.next()) {
-                return String.format(
-                        "🛒 **Информация о заказе:**\n" +
-                                "📄 Номер заказа: %d\n" +
+            boolean ordersFound = false;
+
+            while (resultSet.next()) {
+                ordersFound = true;
+                int orderId = resultSet.getInt("order_id");
+                String status = resultSet.getString("status");
+                Timestamp deliveryDeadline = resultSet.getTimestamp("delivery_deadline");
+
+                response.append(String.format(
+                        "📄 Номер заказа: %d\n" +
                                 "📌 Статус: %s\n" +
-                                "📅 Создан: %s\n" +
-                                "⏰ Доставить до: %s\n" +
-                                "🏬 Основной магазин: %s\n" +
-                                "📦 Магазин дотарки: %s\n" +
-                                "📍 Адрес покупателя: %s\n" +
-                                "📞 Телефон покупателя: %s\n",
-                        resultSet.getInt("order_id"),
-                        resultSet.getString("status"),
-                        resultSet.getTimestamp("created_at"),
-                        resultSet.getTimestamp("delivery_deadline"),
-                        resultSet.getString("main_store"),
-                        resultSet.getString("secondary_store") != null ? resultSet.getString("secondary_store") : "Нет",
-                        resultSet.getString("customer_address"),
-                        resultSet.getString("customer_phone")
-                );
-            } else {
-                return "Заказ не найден.";
+                                "⏰ Доставить до: %s\n\n",
+                        orderId,
+                        status,
+                        deliveryDeadline != null ? deliveryDeadline.toString() : "Нет данных"
+                ));
             }
+
+            if (!ordersFound) {
+                response.append("❌ У вас нет текущих заказов.");
+            }
+
         } catch (SQLException e) {
             e.printStackTrace();
-            return "Ошибка подключения к базе данных.";
+            response.append("Ошибка получения данных из базы: ").append(e.getMessage());
         }
+
+        sendMessage(chatId, response.toString());
     }
 
     private void sendMessage(long chatId, String text) {
