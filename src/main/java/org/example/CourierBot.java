@@ -61,6 +61,13 @@ public class CourierBot extends TelegramLongPollingBot {
                 } catch (NumberFormatException e) {
                     sendMessage(chatId, "❌ Неверный формат ID заказа.");
                 }
+            } else if (callbackData.startsWith("cancelOrder_")) {
+                try {
+                    int orderId = Integer.parseInt(callbackData.split("_")[1]);
+                    cancelOrder(chatId, orderId);
+                } catch (NumberFormatException e) {
+                    sendMessage(chatId, "❌ Неверный формат ID заказа.");
+                }
             }
         }
     }
@@ -113,7 +120,6 @@ public class CourierBot extends TelegramLongPollingBot {
                         resultSet.getString("customer_phone")
                 );
 
-                // Создаем клавиатуру с кнопкой "Взять в работу"
                 InlineKeyboardMarkup keyboardMarkup = new InlineKeyboardMarkup();
                 List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
                 List<InlineKeyboardButton> row = new ArrayList<>();
@@ -124,12 +130,11 @@ public class CourierBot extends TelegramLongPollingBot {
                 keyboard.add(row);
                 keyboardMarkup.setKeyboard(keyboard);
 
-                // Отправляем сообщение с текстом и кнопкой
                 SendMessage message = SendMessage.builder()
                         .chatId(chatId)
                         .text(orderInfo)
                         .replyMarkup(keyboardMarkup)
-                        .parseMode("Markdown") // Для форматирования текста
+                        .parseMode("Markdown")
                         .build();
                 execute(message);
             }
@@ -143,7 +148,6 @@ public class CourierBot extends TelegramLongPollingBot {
             sendMessage(chatId, "Ошибка получения данных из базы.");
         }
     }
-
 
     private void takeOrder(long chatId, int orderId) {
         String query = "UPDATE orders SET status = 'В работе', courier_id = ? WHERE order_id = ? AND status = 'Принят'";
@@ -173,31 +177,66 @@ public class CourierBot extends TelegramLongPollingBot {
             statement.setLong(1, chatId);
             ResultSet resultSet = statement.executeQuery();
 
-            StringBuilder response = new StringBuilder("📋 **Мои заказы:**\n");
             boolean hasOrders = false;
-
             while (resultSet.next()) {
                 hasOrders = true;
-                response.append(String.format(
+                int orderId = resultSet.getInt("order_id");
+                String orderInfo = String.format(
                         "📄 Номер заказа: %d\n" +
                                 "📌 Статус: %s\n" +
                                 "📍 Адрес покупателя: %s\n" +
                                 "📞 Телефон покупателя: %s\n\n",
-                        resultSet.getInt("order_id"),
+                        orderId,
                         resultSet.getString("status"),
                         resultSet.getString("customer_address"),
                         resultSet.getString("customer_phone")
-                ));
+                );
+
+                InlineKeyboardMarkup keyboardMarkup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
+                List<InlineKeyboardButton> row = new ArrayList<>();
+                row.add(InlineKeyboardButton.builder()
+                        .text("Отказаться")
+                        .callbackData("cancelOrder_" + orderId)
+                        .build());
+                keyboard.add(row);
+                keyboardMarkup.setKeyboard(keyboard);
+
+                SendMessage message = SendMessage.builder()
+                        .chatId(chatId)
+                        .text(orderInfo)
+                        .replyMarkup(keyboardMarkup)
+                        .build();
+                execute(message);
             }
 
             if (!hasOrders) {
-                response.append("У вас пока нет активных заказов.");
+                sendMessage(chatId, "У вас пока нет активных заказов.");
             }
 
-            sendMessage(chatId, response.toString());
-        } catch (SQLException e) {
+        } catch (SQLException | TelegramApiException e) {
             e.printStackTrace();
             sendMessage(chatId, "Ошибка получения данных из базы.");
+        }
+    }
+
+    private void cancelOrder(long chatId, int orderId) {
+        String query = "UPDATE orders SET status = 'Принят', courier_id = NULL WHERE order_id = ? AND courier_id = ?";
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement statement = connection.prepareStatement(query)) {
+
+            statement.setInt(1, orderId);
+            statement.setLong(2, chatId);
+
+            int updatedRows = statement.executeUpdate();
+            if (updatedRows > 0) {
+                sendMessage(chatId, "✅ Заказ №" + orderId + " успешно отменен.");
+            } else {
+                sendMessage(chatId, "⚠️ Не удалось отменить заказ №" + orderId + ". Возможно, он уже отменен или принадлежит другому курьеру.");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            sendMessage(chatId, "❌ Ошибка при отмене заказа №" + orderId + ": " + e.getMessage());
         }
     }
 
