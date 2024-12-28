@@ -38,8 +38,7 @@ public class CourierBot extends TelegramLongPollingBot {
 
             switch (messageText) {
                 case "/start":
-                case "Старт":
-                    sendMainMenu(chatId);
+                    requestPhoneNumber(chatId);
                     break;
                 case "Показать все доступные заказы":
                     sendAvailableOrders(chatId);
@@ -50,25 +49,72 @@ public class CourierBot extends TelegramLongPollingBot {
                 default:
                     sendMessage(chatId, "Неизвестная команда. Используйте кнопки меню.");
             }
+        } else if (update.hasMessage() && update.getMessage().hasContact()) {
+            long chatId = update.getMessage().getChatId();
+            String phoneNumber = update.getMessage().getContact().getPhoneNumber();
+
+            if (saveCourierPhoneNumber(chatId, phoneNumber)) {
+                sendMainMenu(chatId);
+            } else {
+                sendMessage(chatId, "❌ Ошибка сохранения номера телефона. Попробуйте снова.");
+            }
         } else if (update.hasCallbackQuery()) {
             String callbackData = update.getCallbackQuery().getData();
             long chatId = update.getCallbackQuery().getMessage().getChatId();
 
             if (callbackData.startsWith("takeOrder_")) {
-                try {
-                    int orderId = Integer.parseInt(callbackData.split("_")[1]);
-                    takeOrder(chatId, orderId);
-                } catch (NumberFormatException e) {
-                    sendMessage(chatId, "❌ Неверный формат ID заказа.");
-                }
+                int orderId = Integer.parseInt(callbackData.split("_")[1]);
+                takeOrder(chatId, orderId);
             } else if (callbackData.startsWith("cancelOrder_")) {
-                try {
-                    int orderId = Integer.parseInt(callbackData.split("_")[1]);
-                    cancelOrder(chatId, orderId);
-                } catch (NumberFormatException e) {
-                    sendMessage(chatId, "❌ Неверный формат ID заказа.");
-                }
+                int orderId = Integer.parseInt(callbackData.split("_")[1]);
+                cancelOrder(chatId, orderId);
             }
+        }
+    }
+
+
+    private void requestPhoneNumber(long chatId) {
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText("Для продолжения работы, пожалуйста, предоставьте свой номер телефона:");
+
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(true);
+
+        KeyboardRow row = new KeyboardRow();
+        KeyboardButton phoneButton = new KeyboardButton("Отправить номер телефона");
+        phoneButton.setRequestContact(true);
+        row.add(phoneButton);
+
+        List<KeyboardRow> keyboard = new ArrayList<>();
+        keyboard.add(row);
+
+        keyboardMarkup.setKeyboard(keyboard);
+        message.setReplyMarkup(keyboardMarkup);
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private boolean saveCourierPhoneNumber(long chatId, String phoneNumber) {
+        String query = "INSERT INTO couriers (courier_id, phone_number) VALUES (?, ?) " +
+                "ON DUPLICATE KEY UPDATE phone_number = ?";
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement statement = connection.prepareStatement(query)) {
+
+            statement.setLong(1, chatId);
+            statement.setString(2, phoneNumber);
+            statement.setString(3, phoneNumber);
+            statement.executeUpdate();
+            return true;
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
         }
     }
 
