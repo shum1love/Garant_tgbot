@@ -22,12 +22,12 @@ public class CourierBot extends TelegramLongPollingBot {
 
     @Override
     public String getBotUsername() {
-        return "garanttestdrivebot1bot"; // Имя вашего бота
+        return "garanttestdrivebot1bot";
     }
 
     @Override
     public String getBotToken() {
-        return "7850699386:AAEc5eqsnUbEUm7tLp_rxU-k7wFmHUfELe8"; // Токен вашего бота
+        return "7850699386:AAEc5eqsnUbEUm7tLp_rxU-k7wFmHUfELe8";
     }
 
     @Override
@@ -53,7 +53,7 @@ public class CourierBot extends TelegramLongPollingBot {
             long chatId = update.getMessage().getChatId();
             String phoneNumber = update.getMessage().getContact().getPhoneNumber();
 
-            if (saveCourierPhoneNumber(chatId, phoneNumber)) {
+            if (saveCourierPhoneNumber(phoneNumber)) {
                 sendMainMenu(chatId);
             } else {
                 sendMessage(chatId, "❌ Ошибка сохранения номера телефона. Попробуйте снова.");
@@ -71,7 +71,6 @@ public class CourierBot extends TelegramLongPollingBot {
             }
         }
     }
-
 
     private void requestPhoneNumber(long chatId) {
         SendMessage message = new SendMessage();
@@ -100,15 +99,13 @@ public class CourierBot extends TelegramLongPollingBot {
         }
     }
 
-    private boolean saveCourierPhoneNumber(long chatId, String phoneNumber) {
-        String query = "INSERT INTO couriers (courier_id, phone_number) VALUES (?, ?) " +
-                "ON DUPLICATE KEY UPDATE phone_number = ?";
+    private boolean saveCourierPhoneNumber(String phoneNumber) {
+        String query = "INSERT INTO couriers (phone_number) VALUES (?) ON DUPLICATE KEY UPDATE phone_number = ?";
         try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
              PreparedStatement statement = connection.prepareStatement(query)) {
 
-            statement.setLong(1, chatId);
+            statement.setString(1, phoneNumber);
             statement.setString(2, phoneNumber);
-            statement.setString(3, phoneNumber);
             statement.executeUpdate();
             return true;
 
@@ -195,12 +192,20 @@ public class CourierBot extends TelegramLongPollingBot {
         }
     }
 
+
     private void takeOrder(long chatId, int orderId) {
-        String query = "UPDATE orders SET status = 'В работе', courier_id = ? WHERE order_id = ? AND status = 'Принят'";
+        // Здесь нужно получить номер телефона, переданный ранее.
+        String phoneNumber = getPhoneNumberFromDatabase(chatId);
+        if (phoneNumber == null) {
+            sendMessage(chatId, "Ваш номер телефона не найден. Пожалуйста, предоставьте его снова.");
+            return;
+        }
+
+        String query = "UPDATE orders SET status = 'В работе', courier_phone = ? WHERE order_id = ? AND status = 'Принят'";
         try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
              PreparedStatement statement = connection.prepareStatement(query)) {
 
-            statement.setLong(1, chatId);
+            statement.setString(1, phoneNumber);
             statement.setInt(2, orderId);
 
             int updatedRows = statement.executeUpdate();
@@ -285,6 +290,22 @@ public class CourierBot extends TelegramLongPollingBot {
             sendMessage(chatId, "❌ Ошибка при отмене заказа №" + orderId + ": " + e.getMessage());
         }
     }
+    private String getPhoneNumberFromDatabase(long chatId) {
+        String query = "SELECT phone_number FROM couriers WHERE chat_id = ?";
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement statement = connection.prepareStatement(query)) {
+
+            statement.setLong(1, chatId);
+            ResultSet resultSet = statement.executeQuery();
+            if (resultSet.next()) {
+                return resultSet.getString("phone_number");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
 
     private void sendMessage(long chatId, String text) {
         SendMessage message = new SendMessage();
